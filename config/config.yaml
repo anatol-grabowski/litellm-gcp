@@ -1,0 +1,19 @@
+# =============================================================================
+# config.yaml — LiteLLM proxy model list & general settings
+# =============================================================================
+# Docs: https://docs.litellm.ai/docs/proxy/configs
+# Add/remove model_list entries for whichever providers you configured API
+# keys for in .env.litellm. api_key: os.environ/NAME pulls the value from the
+# container's environment at request time — nothing is hardcoded here.
+
+model_list:
+  - model_name: gemini-2.5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+litellm_settings:
+  drop_params: true
