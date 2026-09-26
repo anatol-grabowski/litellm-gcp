@@ -100,12 +100,23 @@ First run takes a few minutes (VM boot + image pull). The script prints the
 external IP, the master key, and a ready-to-run test `curl` command.
 
 Re-run `./scripts/deploy.sh` any time after editing the `.env` files or
-`config/config.yaml`. The existing VM is updated in place and reset so its
-startup script reconciles the containers. If `LITELLM_IMAGE` changed, the VM
-pulls that image and recreates the LiteLLM container from it. Postgres stays on
-the same VM and its database files remain under `/var/lib/litellm-postgres-data`,
-so budgets, virtual keys, and spend data survive LiteLLM image upgrades and
-normal deploys.
+`config/config.yaml`. For an existing VM, the script updates instance metadata
+and then immediately runs the reconciliation script over SSH instead of waiting
+for a reboot/startup-script cycle. If `LITELLM_IMAGE` changed, the old LiteLLM container and image are removed
+**before** downloading the replacement. This avoids temporarily keeping two
+large LiteLLM images on the small VM disk. Unused Docker images/build cache are
+also pruned, but Docker volumes and `/var/lib/litellm-postgres-data` are never
+pruned. If a pull still reports `no space left on device` (for example with a
+mutable tag), the VM performs one stronger Docker cleanup without `--volumes`
+and retries the pull once. `deploy.sh` then verifies that the running container
+reports the requested image before it declares success. Postgres stays on the
+same VM, so budgets, virtual keys, and spend data survive LiteLLM image upgrades
+and normal deploys.
+
+The deployment first tries SSH through Google IAP (matching the firewall rule
+created by the script), then falls back to normal SSH if your project already
+permits it. A deploy now fails visibly if it cannot reach the VM or if the
+running image does not match `LITELLM_IMAGE`.
 
 ## 3. Test
 
@@ -148,9 +159,12 @@ curl -X POST http://<EXTERNAL_IP>:4000/key/generate \
   in front of it if you need encryption in transit; that adds cost.
 - **2GB RAM (`e2-small`)** → a 2GB swapfile is created automatically for
   extra headroom running Postgres + LiteLLM together, but sustained heavy
-  traffic may still want `e2-medium`. Change `MACHINE_TYPE` in `.env.gcp`
-  and re-run `deploy.sh` (note: changing machine type requires the instance
-  to be stopped first; `gcloud compute instances set-machine-type` or
+  traffic may still want `e2-medium`. The swapfile, Docker images, and Postgres
+  data all use the COS stateful partition, so a very large future LiteLLM image
+  may outgrow a 10GB boot disk even after cleanup. In that case increase
+  `BOOT_DISK_SIZE_GB` for a larger/new VM disk. Change `MACHINE_TYPE` in
+  `.env.gcp` and re-run `deploy.sh` (note: changing machine type requires the
+  instance to be stopped first; `gcloud compute instances set-machine-type` or
   delete/recreate).
 - **Open to the whole internet** (`ALLOWED_SOURCE_RANGE=0.0.0.0/0`) → access
   is still gated by the master key, but narrow this CIDR if you want
