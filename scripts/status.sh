@@ -6,28 +6,29 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-ENV_PROD_FILE="$ROOT_DIR/.env.prod"
+ENV_GCP_FILE="$ROOT_DIR/.env.gcp"
 ENV_LITELLM_FILE="$ROOT_DIR/.env.litellm"
 
-for f in "$ENV_PROD_FILE"; do
-  [ -f "$f" ] || { echo "ERROR: missing $f" >&2; exit 1; }
-done
+if [ ! -f "$ENV_GCP_FILE" ]; then
+  echo "ERROR: missing $ENV_GCP_FILE (copy .env.gcp.example to .env.gcp first)" >&2
+  exit 1
+fi
 
 set -a
 # shellcheck disable=SC1090
-source "$ENV_PROD_FILE"
+source "$ENV_GCP_FILE"
 # shellcheck disable=SC1090
 [ -f "$ENV_LITELLM_FILE" ] && source "$ENV_LITELLM_FILE"
 set +a
 
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
 if [ -z "$PROJECT_ID" ]; then
-  echo "ERROR: PROJECT_ID is not set in .env.prod and no default gcloud project is configured." >&2
+  echo "ERROR: PROJECT_ID is not set in .env.gcp and no default gcloud project is configured." >&2
   exit 1
 fi
 
-: "${ZONE:?Set ZONE in .env.prod}"
-: "${INSTANCE_NAME:?Set INSTANCE_NAME in .env.prod}"
+: "${ZONE:?Set ZONE in .env.gcp}"
+: "${INSTANCE_NAME:?Set INSTANCE_NAME in .env.gcp}"
 
 echo "========================================================================"
 echo " LiteLLM GCP Status"

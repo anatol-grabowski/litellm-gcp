@@ -7,9 +7,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
+ENV_GCP_FILE="$ROOT_DIR/.env.gcp"
+[ -f "$ENV_GCP_FILE" ] || {
+  echo "ERROR: missing $ENV_GCP_FILE (copy .env.gcp.example to .env.gcp first)" >&2
+  exit 1
+}
+
 set -a
 # shellcheck disable=SC1090
-source "$ROOT_DIR/.env.prod"
+source "$ENV_GCP_FILE"
 set +a
 
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"

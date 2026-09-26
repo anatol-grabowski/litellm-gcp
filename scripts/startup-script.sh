@@ -44,12 +44,18 @@ swapon "$SWAPFILE" 2>/dev/null || true
 docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
 
 # --- Pull images --------------------------------------------------------------
+echo "Desired LiteLLM image: ${IMAGE}"
+echo "Desired Postgres image: ${POSTGRES_IMAGE}"
 docker pull "$POSTGRES_IMAGE"
 docker pull "$IMAGE"
 
-# --- Postgres: recreate the container, keep the data volume -----------------
+# --- Postgres: recreate the container, keep the database files on disk -------
+# Recreating applies env/image changes while the bind-mounted database directory
+# survives normal deploys, VM resets, and container replacement.
 if docker ps -aq -f "name=^/${DB_CONTAINER}\$" | grep -q .; then
-  echo "Removing existing ${DB_CONTAINER} container (data volume is preserved on disk)"
+  CURRENT_DB_IMAGE="$(docker inspect --format='{{.Config.Image}}' "$DB_CONTAINER")"
+  echo "Replacing ${DB_CONTAINER}: ${CURRENT_DB_IMAGE} -> ${POSTGRES_IMAGE}"
+  echo "Postgres data remains at ${DB_DATA_DIR}"
   docker rm -f "$DB_CONTAINER"
 fi
 
@@ -75,9 +81,12 @@ done
 
 DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DB_CONTAINER}:5432/${POSTGRES_DB}"
 
-# --- LiteLLM: recreate the container -----------------------------------------
+# --- LiteLLM: always recreate from the freshly pulled configured image -------
+# This makes a LITELLM_IMAGE version change in .env.gcp take effect on the VM
+# on the very next deploy, while all durable LiteLLM data remains in Postgres.
 if docker ps -aq -f "name=^/${APP_CONTAINER}\$" | grep -q .; then
-  echo "Removing existing ${APP_CONTAINER} container"
+  CURRENT_APP_IMAGE="$(docker inspect --format='{{.Config.Image}}' "$APP_CONTAINER")"
+  echo "Replacing ${APP_CONTAINER}: ${CURRENT_APP_IMAGE} -> ${IMAGE}"
   docker rm -f "$APP_CONTAINER"
 fi
 
@@ -92,6 +101,8 @@ docker run -d \
   "$IMAGE" \
   --config /app/config.yaml \
   --port "${PORT}"
+
+echo "LiteLLM container now uses: $(docker inspect --format='{{.Config.Image}}' "$APP_CONTAINER")"
 
 # --- Reclaim disk space from superseded image layers -------------------------
 docker image prune -f >/dev/null 2>&1 || true

@@ -3,15 +3,16 @@
 Low-cost, reliable deployment of the [LiteLLM proxy](https://docs.litellm.ai/) on a
 single GCE VM: `e2-small`, Container-Optimized OS, an on-VM Postgres container
 for budgets/keys/spend tracking, no managed database service, no load
-balancer. Everything is driven by three `.env` files and a single `deploy.sh`.
+balancer. Everything is driven by three local `.env` files (created from tracked `.example` templates) and a single `deploy.sh`.
 
 ## Layout
 
 | File | Purpose |
 |---|---|
-| `.env.prod` | GCP-side settings — project, zone, machine type, firewall, image tags |
-| `.env.litellm` | LiteLLM runtime settings — master key, salt key, provider API keys |
-| `.env.db` | Postgres credentials for the budgets/keys/spend database |
+| `.env.gcp.example` | Tracked template for GCP-side settings — project, zone, machine type, firewall, image tags |
+| `.env.litellm.example` | Tracked template for LiteLLM runtime settings — master key, salt key, provider API keys |
+| `.env.db.example` | Tracked template for Postgres credentials |
+| `.env.gcp`, `.env.litellm`, `.env.db` | Local deployment files created from the templates; ignored by git |
 | `config/config.yaml` | LiteLLM model list |
 | `scripts/deploy.sh` | Idempotent create/update |
 | `scripts/startup-script.sh` | Runs on the VM itself on every boot; pulls both images and (re)starts the Postgres + LiteLLM containers |
@@ -54,9 +55,25 @@ containers.
 
 ## 1. Configure
 
-Edit `.env.prod`:
+If upgrading an older checkout that still has `.env.prod`, keep your existing
+VM settings by renaming that local file first:
+
+```bash
+mv .env.prod .env.gcp
+```
+
+For a fresh checkout, create the local, git-ignored environment files once:
+
+```bash
+cp .env.gcp.example .env.gcp
+cp .env.litellm.example .env.litellm
+cp .env.db.example .env.db
+```
+
+Edit `.env.gcp`:
 - Set `PROJECT_ID` (or leave blank to use your current `gcloud` default project)
-- Adjust `ZONE`/`REGION` if you're not near `us-central1`
+- Adjust `ZONE`/`REGION` if needed
+- Change `LITELLM_IMAGE` whenever you want to deploy another LiteLLM version
 
 Edit `.env.litellm`:
 - Fill in `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` for whichever providers you
@@ -83,8 +100,12 @@ First run takes a few minutes (VM boot + image pull). The script prints the
 external IP, the master key, and a ready-to-run test `curl` command.
 
 Re-run `./scripts/deploy.sh` any time after editing the `.env` files or
-`config/config.yaml` — it updates the running instance in place (a short
-reboot applies the change).
+`config/config.yaml`. The existing VM is updated in place and reset so its
+startup script reconciles the containers. If `LITELLM_IMAGE` changed, the VM
+pulls that image and recreates the LiteLLM container from it. Postgres stays on
+the same VM and its database files remain under `/var/lib/litellm-postgres-data`,
+so budgets, virtual keys, and spend data survive LiteLLM image upgrades and
+normal deploys.
 
 ## 3. Test
 
@@ -127,7 +148,7 @@ curl -X POST http://<EXTERNAL_IP>:4000/key/generate \
   in front of it if you need encryption in transit; that adds cost.
 - **2GB RAM (`e2-small`)** → a 2GB swapfile is created automatically for
   extra headroom running Postgres + LiteLLM together, but sustained heavy
-  traffic may still want `e2-medium`. Change `MACHINE_TYPE` in `.env.prod`
+  traffic may still want `e2-medium`. Change `MACHINE_TYPE` in `.env.gcp`
   and re-run `deploy.sh` (note: changing machine type requires the instance
   to be stopped first; `gcloud compute instances set-machine-type` or
   delete/recreate).

@@ -11,17 +11,29 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-ENV_PROD_FILE="$ROOT_DIR/.env.prod"
+ENV_GCP_FILE="$ROOT_DIR/.env.gcp"
 ENV_LITELLM_FILE="$ROOT_DIR/.env.litellm"
 ENV_DB_FILE="$ROOT_DIR/.env.db"
 
-for f in "$ENV_PROD_FILE" "$ENV_LITELLM_FILE" "$ENV_DB_FILE"; do
-  [ -f "$f" ] || { echo "ERROR: missing $f" >&2; exit 1; }
+MISSING_ENV=0
+for f in "$ENV_GCP_FILE" "$ENV_LITELLM_FILE" "$ENV_DB_FILE"; do
+  if [ ! -f "$f" ]; then
+    echo "ERROR: missing $f" >&2
+    MISSING_ENV=1
+  fi
 done
+if [ "$MISSING_ENV" = "1" ]; then
+  echo >&2
+  echo "Create local environment files from the tracked examples first:" >&2
+  echo "  cp .env.gcp.example .env.gcp" >&2
+  echo "  cp .env.litellm.example .env.litellm" >&2
+  echo "  cp .env.db.example .env.db" >&2
+  exit 1
+fi
 
 set -a
 # shellcheck disable=SC1090
-source "$ENV_PROD_FILE"
+source "$ENV_GCP_FILE"
 # shellcheck disable=SC1090
 source "$ENV_LITELLM_FILE"
 # shellcheck disable=SC1090
@@ -30,17 +42,17 @@ set +a
 
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
 if [ -z "$PROJECT_ID" ]; then
-  echo "ERROR: PROJECT_ID is not set in .env.prod and no default gcloud project is configured." >&2
+  echo "ERROR: PROJECT_ID is not set in .env.gcp and no default gcloud project is configured." >&2
   exit 1
 fi
 
-: "${REGION:?Set REGION in .env.prod}"
-: "${ZONE:?Set ZONE in .env.prod}"
-: "${INSTANCE_NAME:?Set INSTANCE_NAME in .env.prod}"
-: "${MACHINE_TYPE:?Set MACHINE_TYPE in .env.prod}"
-: "${LITELLM_IMAGE:?Set LITELLM_IMAGE in .env.prod}"
-: "${LITELLM_PORT:?Set LITELLM_PORT in .env.prod}"
-: "${POSTGRES_IMAGE:?Set POSTGRES_IMAGE in .env.prod}"
+: "${REGION:?Set REGION in .env.gcp}"
+: "${ZONE:?Set ZONE in .env.gcp}"
+: "${INSTANCE_NAME:?Set INSTANCE_NAME in .env.gcp}"
+: "${MACHINE_TYPE:?Set MACHINE_TYPE in .env.gcp}"
+: "${LITELLM_IMAGE:?Set LITELLM_IMAGE in .env.gcp}"
+: "${LITELLM_PORT:?Set LITELLM_PORT in .env.gcp}"
+: "${POSTGRES_IMAGE:?Set POSTGRES_IMAGE in .env.gcp}"
 : "${POSTGRES_USER:?Set POSTGRES_USER in .env.db}"
 : "${POSTGRES_DB:?Set POSTGRES_DB in .env.db}"
 
@@ -136,11 +148,24 @@ METADATA="litellm-image=${LITELLM_IMAGE},litellm-port=${LITELLM_PORT},postgres-i
 # -----------------------------------------------------------------------------
 if gcloud compute instances describe "$INSTANCE_NAME" --zone="$ZONE" --project="$PROJECT_ID" >/dev/null 2>&1; then
   echo "==> Instance '${INSTANCE_NAME}' already exists — updating its configuration"
+
+  CURRENT_LITELLM_IMAGE="$(gcloud compute instances describe "$INSTANCE_NAME" \
+    --zone="$ZONE" --project="$PROJECT_ID" \
+    --flatten='metadata.items[]' \
+    --filter='metadata.items.key=litellm-image' \
+    --format='value(metadata.items.value)' 2>/dev/null | head -n 1 || true)"
+
+  if [ "$CURRENT_LITELLM_IMAGE" != "$LITELLM_IMAGE" ]; then
+    echo "==> LiteLLM image change: ${CURRENT_LITELLM_IMAGE:-<unset>} -> ${LITELLM_IMAGE}"
+    echo "    The VM startup script will pull the new image and replace only the LiteLLM container."
+    echo "    Postgres data remains on the VM boot disk at /var/lib/litellm-postgres-data."
+  fi
+
   gcloud compute instances add-metadata "$INSTANCE_NAME" \
     --zone="$ZONE" --project="$PROJECT_ID" \
     --metadata-from-file="$METADATA_FROM_FILE" \
     --metadata="$METADATA"
-  echo "==> Resetting instance so the updated startup script re-applies"
+  echo "==> Resetting instance so updated metadata/images are reconciled on the VM"
   gcloud compute instances reset "$INSTANCE_NAME" --zone="$ZONE" --project="$PROJECT_ID"
 else
   echo "==> Creating instance '${INSTANCE_NAME}'"
