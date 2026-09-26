@@ -1,7 +1,11 @@
 # Local environment files may contain deployment credentials and API keys.
 .env
-.env.*
+.env.db
+.env.litellm
+.env.gcp
 
 # Keep sanitized templates in git.
 !.env.example
-!.env.*.example
+!.env.db.example
+!.env.litellm.example
+!.env.gcp.example
