@@ -1,0 +1,69 @@
+# Self-contained local LiteLLM stack for Podman Compose.
+#
+# Run:
+#   podman compose -f podman-compose.yml up -d
+#   podman compose -f podman-compose.yml logs -f litellm
+#   podman compose -f podman-compose.yml down
+#
+# UI: http://localhost:4000/ui
+# User: admin
+# Password: the LITELLM_MASTER_KEY below
+#
+# The LiteLLM/Postgres credentials below are randomly generated LOCAL-ONLY
+# credentials. Provider API keys cannot be generated locally: paste the real
+# ones you need below. Do not commit this file after adding real provider keys.
+
+services:
+  postgres:
+    image: 'postgres:17-alpine'
+    environment:
+      POSTGRES_USER: 'litellm'
+      POSTGRES_DB: 'litellm'
+      POSTGRES_PASSWORD: '1f4619cb5068752c2ac8dc257121cf559db01b45beb89f66'
+    volumes:
+      - 'litellm-postgres-data:/var/lib/postgresql/data'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U litellm -d litellm']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  litellm:
+    image: 'ghcr.io/berriai/litellm-database:v1.100.3'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - '4000:4000'
+    environment:
+      LITELLM_MASTER_KEY: 'sk-local-f09aae44ad5f87e75e102ee4a748ca43275a0d6c02a7e479'
+      LITELLM_SALT_KEY: 'sk-salt-e7164322eb8d689f4184e079df8dcb3238f42635426235f83fab89211f4143f2'
+      STORE_MODEL_IN_DB: 'True'
+      DATABASE_URL: 'postgresql://litellm:1f4619cb5068752c2ac8dc257121cf559db01b45beb89f66@postgres:5432/litellm'
+      PORT: '4000'
+
+      # Paste real provider credentials here. Unused providers may stay blank.
+      OPENAI_API_KEY: ''
+      ANTHROPIC_API_KEY: ''
+      GEMINI_API_KEY: 'CHANGE_ME'
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        cat > /tmp/litellm-config.yaml <<'LITELLM_CONFIG'
+        model_list:
+          - model_name: gemini-2.5-flash
+            litellm_params:
+              model: gemini/gemini-2.5-flash
+              api_key: os.environ/GEMINI_API_KEY
+
+        general_settings:
+          master_key: os.environ/LITELLM_MASTER_KEY
+
+        litellm_settings:
+          drop_params: true
+        LITELLM_CONFIG
+
+        exec litellm --config /tmp/litellm-config.yaml --port 4000
+
+volumes:
+  litellm-postgres-data:
