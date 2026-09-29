@@ -1,4 +1,4 @@
-# Self-contained local LiteLLM + Postgres + example MCP stack for Podman Compose.
+# Self-contained local LiteLLM + Postgres + MCP demo stack for Podman Compose.
 #
 # Run from this directory:
 #   podman compose up -d
@@ -6,18 +6,15 @@
 #   podman compose down
 #
 # LiteLLM UI: http://localhost:4000/ui
-# User: admin
-# Password: the LITELLM_MASTER_KEY below
+# Local MCP test app: http://localhost:3002
 # Example MCP direct endpoint: http://localhost:3001/mcp
 #
-# The LiteLLM/Postgres credentials below are LOCAL-ONLY credentials. Provider
-# API keys cannot be generated locally: paste the real ones you need below.
-# Do not commit this file after adding real provider keys.
+# The LiteLLM/Postgres credentials below are LOCAL-ONLY credentials. Prefer
+# putting real provider keys in podman-compose.override.yml (ignored by git).
 
 services:
   postgres:
     image: 'postgres:17-alpine'
-    restart: unless-stopped
     environment:
       POSTGRES_USER: 'litellm'
       POSTGRES_DB: 'litellm'
@@ -32,7 +29,6 @@ services:
 
   example-mcp:
     image: 'node:22-alpine'
-    restart: unless-stopped
     command: ['node', '/app/example-mcp.js']
     environment:
       PORT: '3000'
@@ -51,8 +47,7 @@ services:
       retries: 30
 
   litellm:
-    image: 'ghcr.io/berriai/litellm-database:v1.100.3'
-    restart: unless-stopped
+    image: 'ghcr.io/berriai/litellm-database:v1.91.2'
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,9 +60,10 @@ services:
       LITELLM_SALT_KEY: 'sk-salt-e7164322eb8d689f4184e079df8dcb3238f42635426235f83fab89211f4143f2'
       STORE_MODEL_IN_DB: 'True'
       DATABASE_URL: 'postgresql://litellm:1f4619cb5068752c2ac8dc257121cf559db01b45beb89f66@postgres:5432/litellm'
+      PROXY_BASE_URL: 'http://localhost:4000'
       PORT: '4000'
 
-      # Paste real provider credentials here. Unused providers may stay blank.
+      # Prefer overriding real provider keys in podman-compose.override.yml.
       OPENAI_API_KEY: ''
       ANTHROPIC_API_KEY: ''
       GEMINI_API_KEY: 'CHANGE_ME'
@@ -83,11 +79,13 @@ services:
 
         general_settings:
           master_key: os.environ/LITELLM_MASTER_KEY
+          store_model_in_db: true
 
         litellm_settings:
           drop_params: true
           mcp_aliases:
             example: example_mcp
+            notion: notion
 
         mcp_servers:
           example_mcp:
@@ -95,15 +93,42 @@ services:
             transport: http
             description: Dependency-free JavaScript MCP example with echo and add tools
             allow_all_keys: true
+
           notion:
             url: https://mcp.notion.com/mcp
             transport: http
             auth_type: oauth2
             oauth2_flow: authorization_code
+            description: Notion hosted MCP using per-user OAuth
             allow_all_keys: true
         LITELLM_CONFIG
 
         exec litellm --config /tmp/litellm-config.yaml --port 4000
+
+  test-app:
+    image: 'node:22-alpine'
+    depends_on:
+      litellm:
+        condition: service_started
+    command: ['node', '/app/test-app.js']
+    environment:
+      PORT: '3008'
+      LITELLM_BASE_URL: 'http://litellm:4000'
+      LITELLM_PUBLIC_URL: 'http://localhost:4000'
+      PUBLIC_ORIGIN: 'http://localhost:3008'
+    volumes:
+      - './test-app.js:/app/test-app.js:ro'
+    ports:
+      - '3008:3008'
+    healthcheck:
+      test:
+        - 'CMD'
+        - 'node'
+        - '-e'
+        - "fetch('http://127.0.0.1:3008/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 2s
+      timeout: 3s
+      retries: 30
 
 volumes:
   litellm-postgres-data:

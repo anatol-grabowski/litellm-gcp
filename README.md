@@ -182,32 +182,53 @@ curl -X POST http://<EXTERNAL_IP>:4000/key/generate \
 Local-only files live under `local/` so they stay separate from the GCP
 deployment:
 
-- `local/podman-compose.yml` — LiteLLM + Postgres + example MCP server
-- `local/example-mcp.js` — dependency-free Node.js MCP server exposing `echo` and `add` tools
+- `local/podman-compose.yml` — LiteLLM + Postgres + example MCP + local test app
+- `local/example-mcp.js` — dependency-free Node.js MCP server exposing `echo` and `add`
+- `local/test-app.js` — dependency-free Node.js server that serves a small HTML/JS LiteLLM + MCP tester
+- `local/podman-compose.override.yml.example` — safe template for local provider-key overrides
 
-The compose file contains the local Postgres/LiteLLM credentials and generates
-the LiteLLM YAML configuration inside the container. The MCP is registered as
-`example_mcp` over Streamable HTTP and is available to all LiteLLM keys. No
-`.env.*` files or npm packages are required for the local stack.
-
-Before first use, edit the provider-key block in `local/podman-compose.yml` and
-paste the real upstream key(s) you need, for example `GEMINI_API_KEY`.
+The main compose file contains only local LiteLLM/Postgres credentials. Keep real
+provider credentials in an ignored override file:
 
 ```bash
 cd local
-podman compose up -d
-podman compose logs -f
+cp podman-compose.override.yml.example podman-compose.override.yml
+# edit GEMINI_API_KEY in podman-compose.override.yml
+
+podman compose \
+  -f podman-compose.yml \
+  -f podman-compose.override.yml \
+  up -d
 ```
 
-Open `http://localhost:4000/ui` and sign in as `admin`, using the
-`LITELLM_MASTER_KEY` value from `local/podman-compose.yml` as the password.
-The example MCP is also exposed directly at `http://localhost:3001/mcp` for
-debugging, while LiteLLM reaches it over the private Compose network at
-`http://example-mcp:3000/mcp`.
+There is deliberately no `restart:` policy, so the containers do not become a
+machine-startup service. Start them explicitly with `podman compose up`.
+
+Open:
+
+- LiteLLM UI: `http://localhost:4000/ui`
+- Local MCP test app: `http://localhost:3002`
+- Example MCP directly: `http://localhost:3001/mcp`
+
+Sign into the LiteLLM UI as `admin`, using the `LITELLM_MASTER_KEY` value from
+`local/podman-compose.yml` as the password.
+
+The local test app accepts a **user virtual key** and can send a normal prompt,
+run it with all MCP tools, or restrict the request to Notion/example MCP. For
+Notion, use a virtual key that has a LiteLLM `user_id`: LiteLLM stores interactive
+OAuth credentials by `(user_id, server_id)`, so a service key with no user cannot
+own the Notion credential.
+
+When Notion is selected, the app checks LiteLLM's per-user OAuth credential
+status first. If login is missing/expired it shows a clear login panel. **Log in
+to Notion** starts OAuth + PKCE in a popup. The callback returns to the local app,
+the app exchanges the code through LiteLLM, and then stores the resulting
+access/refresh token with LiteLLM's `oauth-user-credential` endpoint using that
+same virtual key. The browser never receives the Notion tokens.
 
 The Postgres database persists in the named volume `litellm-postgres-data`.
-Normal restarts and `podman compose down` preserve it. To intentionally wipe
-the local LiteLLM database as well:
+Normal restarts and `podman compose down` preserve it. To intentionally wipe the
+local LiteLLM database as well:
 
 ```bash
 podman compose down -v
@@ -218,9 +239,18 @@ podman compose down -v
 ```bash
 curl -s http://localhost:3001/mcp \
   -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-It exposes `echo` and `add`; LiteLLM registers the server under the friendly
-alias `example`.
+### Test LiteLLM MCP with a virtual key
+
+For direct MCP traffic, prefer `x-litellm-api-key` so the `Authorization` header
+remains available for upstream OAuth:
+
+```bash
+curl -s http://localhost:4000/notion/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H "x-litellm-api-key: Bearer $LITELLM_API_KEY" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
