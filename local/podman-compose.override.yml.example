@@ -1,0 +1,4 @@
+services:
+  litellm:
+    environment:
+      GEMINI_API_KEY: 'CHANGE_ME'
