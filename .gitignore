@@ -9,3 +9,5 @@
 !.env.db.example
 !.env.litellm.example
 !.env.gcp.example
+
+local/podman-compose.override.yml

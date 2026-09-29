@@ -1,21 +1,23 @@
-# Self-contained local LiteLLM stack for Podman Compose.
+# Self-contained local LiteLLM + Postgres + example MCP stack for Podman Compose.
 #
-# Run:
-#   podman compose -f podman-compose.yml up -d
-#   podman compose -f podman-compose.yml logs -f litellm
-#   podman compose -f podman-compose.yml down
+# Run from this directory:
+#   podman compose up -d
+#   podman compose logs -f
+#   podman compose down
 #
-# UI: http://localhost:4000/ui
+# LiteLLM UI: http://localhost:4000/ui
 # User: admin
 # Password: the LITELLM_MASTER_KEY below
+# Example MCP direct endpoint: http://localhost:3001/mcp
 #
-# The LiteLLM/Postgres credentials below are randomly generated LOCAL-ONLY
-# credentials. Provider API keys cannot be generated locally: paste the real
-# ones you need below. Do not commit this file after adding real provider keys.
+# The LiteLLM/Postgres credentials below are LOCAL-ONLY credentials. Provider
+# API keys cannot be generated locally: paste the real ones you need below.
+# Do not commit this file after adding real provider keys.
 
 services:
   postgres:
     image: 'postgres:17-alpine'
+    restart: unless-stopped
     environment:
       POSTGRES_USER: 'litellm'
       POSTGRES_DB: 'litellm'
@@ -28,10 +30,33 @@ services:
       timeout: 3s
       retries: 30
 
+  example-mcp:
+    image: 'node:22-alpine'
+    restart: unless-stopped
+    command: ['node', '/app/example-mcp.js']
+    environment:
+      PORT: '3000'
+    volumes:
+      - './example-mcp.js:/app/example-mcp.js:ro'
+    ports:
+      - '3001:3000'
+    healthcheck:
+      test:
+        - 'CMD'
+        - 'node'
+        - '-e'
+        - "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   litellm:
     image: 'ghcr.io/berriai/litellm-database:v1.100.3'
+    restart: unless-stopped
     depends_on:
       postgres:
+        condition: service_healthy
+      example-mcp:
         condition: service_healthy
     ports:
       - '4000:4000'
@@ -61,6 +86,21 @@ services:
 
         litellm_settings:
           drop_params: true
+          mcp_aliases:
+            example: example_mcp
+
+        mcp_servers:
+          example_mcp:
+            url: http://example-mcp:3000/mcp
+            transport: http
+            description: Dependency-free JavaScript MCP example with echo and add tools
+            allow_all_keys: true
+          notion:
+            url: https://mcp.notion.com/mcp
+            transport: http
+            auth_type: oauth2
+            oauth2_flow: authorization_code
+            allow_all_keys: true
         LITELLM_CONFIG
 
         exec litellm --config /tmp/litellm-config.yaml --port 4000

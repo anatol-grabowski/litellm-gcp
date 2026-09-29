@@ -176,3 +176,51 @@ curl -X POST http://<EXTERNAL_IP>:4000/key/generate \
 - **No Redis** → budgets and rate limits are accurate for this single-replica
   setup; Redis only becomes necessary if you scale to multiple LiteLLM
   containers/replicas sharing the same counters.
+
+## Local Podman Compose
+
+Local-only files live under `local/` so they stay separate from the GCP
+deployment:
+
+- `local/podman-compose.yml` — LiteLLM + Postgres + example MCP server
+- `local/example-mcp.js` — dependency-free Node.js MCP server exposing `echo` and `add` tools
+
+The compose file contains the local Postgres/LiteLLM credentials and generates
+the LiteLLM YAML configuration inside the container. The MCP is registered as
+`example_mcp` over Streamable HTTP and is available to all LiteLLM keys. No
+`.env.*` files or npm packages are required for the local stack.
+
+Before first use, edit the provider-key block in `local/podman-compose.yml` and
+paste the real upstream key(s) you need, for example `GEMINI_API_KEY`.
+
+```bash
+cd local
+podman compose up -d
+podman compose logs -f
+```
+
+Open `http://localhost:4000/ui` and sign in as `admin`, using the
+`LITELLM_MASTER_KEY` value from `local/podman-compose.yml` as the password.
+The example MCP is also exposed directly at `http://localhost:3001/mcp` for
+debugging, while LiteLLM reaches it over the private Compose network at
+`http://example-mcp:3000/mcp`.
+
+The Postgres database persists in the named volume `litellm-postgres-data`.
+Normal restarts and `podman compose down` preserve it. To intentionally wipe
+the local LiteLLM database as well:
+
+```bash
+podman compose down -v
+```
+
+### Test the example MCP directly
+
+```bash
+curl -s http://localhost:3001/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
+It exposes `echo` and `add`; LiteLLM registers the server under the friendly
+alias `example`.
