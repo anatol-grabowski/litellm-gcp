@@ -47,7 +47,7 @@ services:
       retries: 30
 
   litellm:
-    image: 'ghcr.io/berriai/litellm-database:v1.91.2'
+    image: 'ghcr.io/berriai/litellm-database:v1.100.3'
     depends_on:
       postgres:
         condition: service_healthy
