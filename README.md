@@ -214,10 +214,27 @@ Sign into the LiteLLM UI as `admin`, using the `LITELLM_MASTER_KEY` value from
 `local/podman-compose.yml` as the password.
 
 The local test app accepts a **user virtual key** and can send a normal prompt,
-run it with all MCP tools, or restrict the request to Notion/example MCP. For
-Notion, use a virtual key that has a LiteLLM `user_id`: LiteLLM stores interactive
-OAuth credentials by `(user_id, server_id)`, so a service key with no user cannot
-own the Notion credential.
+run it with all MCP tools, or restrict the request to Notion/example MCP. Model
+text is streamed into the page as LiteLLM emits it. The app behaves like a small
+agent loop: LiteLLM gets the MCP definitions, the model can select one or more
+tools, tool calls/results are shown in the activity area, results are fed back to
+the model, and the conversation continues until there is a final user-visible
+answer (with a safety round limit). The streaming parser handles both fragmented
+and repeated tool-call fields from provider adapters, and the fallback tool mapper
+tolerates LiteLLM's MCP prefix plus `-`/`_` name transformations. Notion async
+tasks are polled to a terminal state before the model continues.
+
+For Notion, use a virtual key that has a LiteLLM `user_id`: LiteLLM stores
+interactive OAuth credentials by `(user_id, server_id)`, so a service key with no
+user cannot own the Notion credential.
+
+The **MCP authorization** section always shows **Log in**, **Log out**, and
+**Check OAuth status** for each OAuth MCP server visible to the key. Log out
+removes that server's stored per-user OAuth credential. The local helper also
+logs every outgoing LiteLLM request to stderr as a pasteable `curl` command using
+`http://localhost:4000`; authorization
+headers and OAuth/API secrets are replaced with `<redacted>`. `example-mcp.js`
+logs incoming JSON-RPC methods and tool calls with their arguments.
 
 When Notion is selected, the app checks LiteLLM's per-user OAuth credential
 status first. If login is missing/expired it shows a clear login panel. **Log in

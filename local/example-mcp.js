@@ -8,6 +8,27 @@ const serverInfo = {
   version: '1.0.0',
 }
 
+function logEvent(message) {
+  process.stderr.write(`[example-mcp ${new Date().toISOString()}] ${message}\n`)
+}
+
+function logRpcMessage(message) {
+  if (!message || typeof message !== 'object') {
+    logEvent('invalid JSON-RPC payload')
+    return
+  }
+
+  const method = String(message.method || '<missing method>')
+  if (method === 'tools/call') {
+    const name = String(message.params?.name || '<missing tool>')
+    const args = message.params?.arguments || {}
+    logEvent(`tools/call ${name} ${JSON.stringify(args)}`)
+    return
+  }
+
+  logEvent(`${method} ${JSON.stringify(message.params || {})}`)
+}
+
 const tools = [
   {
     name: 'echo',
@@ -217,6 +238,7 @@ const server = http.createServer((request, response) => {
     if (Array.isArray(payload)) {
       const results = []
       for (let i = 0; i < payload.length; i += 1) {
+        logRpcMessage(payload[i])
         const result = handleMessage(payload[i])
         if (result !== null) {
           results.push(result)
@@ -233,6 +255,7 @@ const server = http.createServer((request, response) => {
       return
     }
 
+    logRpcMessage(payload)
     const result = handleMessage(payload)
     if (result === null) {
       response.writeHead(202)
